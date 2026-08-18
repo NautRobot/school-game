@@ -1,242 +1,466 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Brawler</title>
-    <script src="https://unpkg.com/peerjs@1.5.0/dist/peerjs.min.js"></script>
-    <style>
-        body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif; }
-        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
-        #setup { pointer-events: auto; background: rgba(0,0,0,0.8); width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: absolute; z-index: 10; }
-        .box { background: #333; padding: 20px; border-radius: 8px; text-align: center; border: 2px solid #555; }
-        input, button { padding: 10px; margin: 5px; font-size: 16px; pointer-events: auto; }
-        
-        /* Health Bars */
-        #hud { display: none; justify-content: space-between; padding: 20px; position: absolute; top: 0; width: 100%; box-sizing: border-box; }
-        .health-bar-container { width: 300px; height: 30px; background: #444; border: 3px solid #fff; border-radius: 5px; overflow: hidden; }
-        .health-fill { height: 100%; background: #00ff00; transition: width 0.1s; }
-        #p1-health { transform-origin: left; }
-        #p2-health { background: #ff3333; transform-origin: right; }
-        .player-label { font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
-        
-        #game-over { display: none; position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; text-align: center; text-shadow: 2px 2px 0 #000; }
-    </style>
+    <meta charset="UTF-8">
+    <title>Wasteland Survival - Full Version</title>
+    <script src="https://unpkg.com/peerjs@1.5.0/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; color: #fff; font-family: monospace; }
+        
+        #setup, #game-over { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+        #game-over { display: none; z-index: 20; background: rgba(20, 0, 0, 0.9); }
+        .box { background: #222; padding: 30px; border-radius: 8px; border: 2px solid #444; text-align: center; max-width: 400px; }
+        
+        h1 { margin-top: 0; color: #ff3355; font-size: 40px; text-shadow: 3px 3px 0 #000; }
+        h2 { margin-top: 0; color: #00ff88; }
+        input, button { padding: 12px; margin: 5px; font-size: 16px; border-radius: 4px; border: none; width: 90%; box-sizing: border-box; }
+        button { background: #00ff88; color: #000; cursor: pointer; font-weight: bold; }
+        button:hover { background: #00cc6a; }
+        
+        /* Advanced UI */
+        #ui { position: absolute; top: 10px; left: 10px; z-index: 5; display: none; }
+        .stat-bar-container { width: 200px; height: 15px; background: #333; border: 2px solid #fff; margin-bottom: 5px; position: relative;}
+        .stat-fill { height: 100%; transition: width 0.1s; }
+        .stat-label { position: absolute; top: -2px; left: 5px; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 0 #000; }
+        
+        #inventory-ui { display: flex; gap: 10px; margin-top: 15px; }
+        .inv-slot { width: 50px; height: 50px; border: 2px solid #aaa; background: rgba(0,0,0,0.5); position: relative; border-radius: 5px; display: flex; align-items: center; justify-content: center; font-size: 10px;}
+        .inv-key { position: absolute; top: 2px; left: 4px; color: #ffcc00; font-weight: bold; font-size: 14px;}
+        
+        canvas { display: block; }
+    </style>
 </head>
 <body>
 
-    <!-- Setup Menu -->
-    <div id="setup">
-        <div class="box">
-            <h2>P2P Fighting Game</h2>
-            <p>Your ID: <strong id="my-id" style="color: #00ff00;">Loading...</strong></p>
-            <hr style="border-color: #555;">
-            <p>Send your ID to a friend, or connect to theirs:</p>
-            <input type="text" id="friend-id" placeholder="Paste Friend's ID here">
-            <button onclick="connectToFriend()">FIGHT</button>
-        </div>
-    </div>
+    <div id="setup">
+        <div class="box">
+            <h2>Wasteland Survival V2</h2>
+            <p>Your Game ID: <br><strong id="my-id" style="color: #00ff88; font-size: 24px;">Loading...</strong></p>
+            <button onclick="startAsHost()">HOST GAME</button>
+            <hr style="border-color: #444; margin: 20px 0;">
+            <input type="text" id="friend-id" placeholder="Paste Host ID here">
+            <button onclick="connectToHost()">JOIN HOST</button>
+        </div>
+    </div>
 
-    <!-- In-Game HUD -->
-    <div id="hud">
-        <div>
-            <div class="player-label" id="my-label">You (P1)</div>
-            <div class="health-bar-container"><div id="my-health" class="health-fill" style="width: 100%;"></div></div>
-        </div>
-        <div style="text-align: right;">
-            <div class="player-label" id="enemy-label">Enemy (P2)</div>
-            <div class="health-bar-container"><div id="enemy-health" class="health-fill" style="width: 100%; float: right;"></div></div>
-        </div>
-    </div>
-    
-    <div id="game-over"></div>
+    <div id="game-over">
+        <div class="box" style="border-color: #ff3355;">
+            <h1>YOU DIED</h1>
+            <p>Final Score: <strong id="death-score" style="color: #ffcc00;">0</strong></p>
+            <button onclick="requestRespawn()">RESPAWN</button>
+        </div>
+    </div>
 
-    <!-- Game Canvas -->
-    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div class="stat-bar-container"><div id="hp-fill" class="stat-fill" style="background:#00ff00; width:100%;"></div><div class="stat-label">HP</div></div>
+        <div class="stat-bar-container"><div id="hunger-fill" class="stat-fill" style="background:#ff8800; width:100%;"></div><div class="stat-label">HUNGER</div></div>
+        <div class="stat-bar-container"><div id="thirst-fill" class="stat-fill" style="background:#0088ff; width:100%;"></div><div class="stat-label">THIRST</div></div>
+        <div style="color: #ffcc00; font-size: 18px; font-weight: bold; text-shadow: 2px 2px 0 #000;">Scrap: <span id="score-text">0</span></div>
+        
+        <div id="inventory-ui">
+            <div class="inv-slot" id="slot-1"><span class="inv-key">1</span><img id="img-slot-1" style="display:none; width:30px;"></div>
+            <div class="inv-slot" id="slot-2"><span class="inv-key">2</span><img id="img-slot-2" style="display:none; width:30px;"></div>
+            <div class="inv-slot" id="slot-3"><span class="inv-key">3</span><img id="img-slot-3" style="display:none; width:30px;"></div>
+        </div>
+        <div style="margin-top:5px; font-size:14px; font-weight:bold; color:#00ffff;">Weapon: <span id="weapon-text">PISTOL</span></div>
+    </div>
 
-    <script>
-        // --- 1. NETWORKING SETUP (PeerJS) ---
-        const peer = new Peer();
-        let conn = null;
-        let isHost = false;
+    <canvas id="gameCanvas"></canvas>
 
-        peer.on('open', (id) => {
-            document.getElementById('my-id').innerText = id;
-        });
+    <script>
+        // ==========================================
+        // 1. ASSETS
+        // ==========================================
+        function makeSVG(svg) { const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg); return img; }
+        const assets = {
+            1: makeSVG(`<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="#00bbff"/><rect x="20" y="12" width="16" height="12" fill="#fff" rx="4"/></svg>`),
+            2: makeSVG(`<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><circle cx="20" cy="20" r="18" fill="#ff3355"/><rect x="20" y="12" width="16" height="12" fill="#fff" rx="4"/></svg>`),
+            enemy: makeSVG(`<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg"><polygon points="20,0 40,20 20,40 0,20" fill="#cc0000"/><circle cx="20" cy="20" r="10" fill="#ffaa00"/></svg>`),
+            boss: makeSVG(`<svg width="80" height="80" viewBox="0 0 80 80" xmlns="http://www.w3.org/2000/svg"><polygon points="40,0 80,40 40,80 0,40" fill="#aa00ff"/><circle cx="40" cy="40" r="20" fill="#ff0000"/></svg>`),
+            food: makeSVG(`<svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><circle cx="15" cy="15" r="12" fill="#8b4513"/></svg>`),
+            water: makeSVG(`<svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><path d="M15,2 L25,18 A10,10 0 1,1 5,18 Z" fill="#00bbff"/></svg>`),
+            scrap: makeSVG(`<svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><polygon points="12,2 22,8 22,16 12,22 2,16 2,8" fill="#aaaaaa"/><circle cx="12" cy="12" r="5" fill="#ffcc00"/></svg>`),
+            rifle: makeSVG(`<svg width="40" height="20" viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="5" width="40" height="8" fill="#555"/><rect x="10" y="13" width="8" height="7" fill="#333"/></svg>`),
+            medkit: makeSVG(`<svg width="30" height="30" viewBox="0 0 30 30" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="5" width="26" height="20" fill="#fff"/><rect x="12" y="8" width="6" height="14" fill="#f00"/><rect x="8" y="12" width="14" height="6" fill="#f00"/></svg>`)
+        };
 
-        // Scenario A: Someone connects to us
-        peer.on('connection', (connection) => {
-            conn = connection;
-            isHost = true; // The person who generated the base ID is Host (starts on left)
-            setupNetworkEvents();
-        });
+        // ==========================================
+        // 2. STATE & SETUP
+        // ==========================================
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+        const MAP_SIZE = 3000;
+        let isHost = false, gameActive = false, myId = 1;
+        
+        const players = {
+            1: { active: false, x: MAP_SIZE/2, y: MAP_SIZE/2, hp: 100, hunger: 100, thirst: 100, speed: 6, facing: 1, yfacing: 1, score: 0, infected: false, weapon: 'pistol', inventory: [null, null, null] },
+            2: { active: false, x: MAP_SIZE/2+50, y: MAP_SIZE/2, hp: 100, hunger: 100, thirst: 100, speed: 6, facing: 1, yfacing: 1, score: 0, infected: false, weapon: 'pistol', inventory: [null, null, null] }
+        };
+        let npcs = [], items = [], bullets = [], effects = [];
 
-        // Scenario B: We connect to someone
-        function connectToFriend() {
-            const friendId = document.getElementById('friend-id').value;
-            if (!friendId) return;
-            conn = peer.connect(friendId);
-            isHost = false; // We joined, so we start on the right
-            conn.on('open', setupNetworkEvents);
-        }
+        const keys = {};
+        window.addEventListener('keydown', e => { 
+            keys[e.key.toLowerCase()] = true; 
+            if (e.key === '1') useItem(0);
+            if (e.key === '2') useItem(1);
+            if (e.key === '3') useItem(2);
+        });
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-        function setupNetworkEvents() {
-            document.getElementById('setup').style.display = 'none';
-            document.getElementById('hud').style.display = 'flex';
-            
-            // Set spawn positions based on who hosted
-            myPlayer.x = isHost ? 150 : 650;
-            myPlayer.color = isHost ? '#00bbff' : '#ff3355';
-            myPlayer.facingRight = isHost;
+        function startGameUI() {
+            document.getElementById('setup').style.display = 'none';
+            document.getElementById('ui').style.display = 'block';
+            players[myId].active = true;
+            gameActive = true;
+            requestAnimationFrame(gameLoop);
+        }
 
-            enemy.x = isHost ? 650 : 150;
-            enemy.color = isHost ? '#ff3355' : '#00bbff';
-            enemy.facingRight = !isHost;
+        // ==========================================
+        // 3. NETWORKING
+        // ==========================================
+        const peer = new Peer();
+        let clients = []; let myHostConn = null;
 
-            // Listen for incoming game state
-            conn.on('data', (data) => {
-                if (data.type === 'sync') {
-                    enemy.x = data.x;
-                    enemy.y = data.y;
-                    enemy.isAttacking = data.isAttacking;
-                    enemy.facingRight = data.facingRight;
-                } else if (data.type === 'damage') {
-                    myPlayer.hp -= data.amount;
-                    updateHealthUI();
-                    if (myPlayer.hp <= 0) endGame("YOU LOSE");
-                }
-            });
+        peer.on('open', id => document.getElementById('my-id').innerText = id);
 
-            // Start Game Loop
-            requestAnimationFrame(gameLoop);
-            
-            // Sync loop (send data 30 times a second)
-            setInterval(sendSync, 1000 / 30);
-        }
+        function startAsHost() {
+            isHost = true; myId = 1; startGameUI();
+            setInterval(hostSpawnLogic, 2000); 
+            setInterval(hostSyncLoop, 1000/30);
+        }
 
-        function sendSync() {
-            if (conn && conn.open) {
-                conn.send({
-                    type: 'sync',
-                    x: myPlayer.x,
-                    y: myPlayer.y,
-                    isAttacking: myPlayer.isAttacking,
-                    facingRight: myPlayer.facingRight
-                });
-            }
-        }
+        peer.on('connection', conn => {
+            if (!isHost) return;
+            let aId = players[2].active ? null : 2; // Limit to 2 players for code space, can expand
+            if (!aId) return;
+            players[aId].active = true;
+            clients.push({ id: aId, connection: conn });
+            conn.on('open', () => conn.send({ type: 'welcome', id: aId }));
+            conn.on('data', data => handleData(aId, data));
+            conn.on('close', () => { players[aId].active = false; clients = clients.filter(c=>c.id!==aId); });
+        });
 
-        // --- 2. GAME LOGIC & PHYSICS ---
-        const canvas = document.getElementById('gameCanvas');
-        const ctx = canvas.getContext('2d');
-        canvas.width = window.innerWidth;
-        canvas.height = window.innerHeight;
+        function hostSyncLoop() {
+            if (!isHost) return;
+            
+            // Host processes virus logic
+            for(let id=1; id<=2; id++) {
+                let p = players[id];
+                if(p.active && p.hp > 0 && p.infected) {
+                    p.hp -= 0.1; // Virus DOT
+                    // Spread virus to close players
+                    for(let j=1; j<=2; j++) {
+                        if(j!==id && players[j].active && Math.hypot(p.x-players[j].x, p.y-players[j].y) < 80) players[j].infected = true;
+                    }
+                }
+            }
 
-        const GROUND_Y = canvas.height - 100;
-        const GRAVITY = 0.8;
+            clients.forEach(c => { if(c.connection.open) c.connection.send({ type: 'sync', players: players, npcs: npcs, items: items }); });
+        }
 
-        const myPlayer = { x: 0, y: GROUND_Y - 150, width: 60, height: 150, color: 'blue', hp: 100, vy: 0, speed: 7, isAttacking: false, facingRight: true, attackCooldown: false };
-        const enemy = { x: 0, y: GROUND_Y - 150, width: 60, height: 150, color: 'red', hp: 100, isAttacking: false, facingRight: false };
+        function connectToHost() {
+            const fId = document.getElementById('friend-id').value;
+            if(!fId) return;
+            isHost = false; myHostConn = peer.connect(fId);
+            myHostConn.on('data', data => {
+                if (data.type === 'welcome') { myId = data.id; startGameUI(); setInterval(clientSyncLoop, 1000/30); } 
+                else handleData(1, data);
+            });
+        }
 
-        const keys = {};
-        window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
-        window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+        function clientSyncLoop() {
+            if (myHostConn && myHostConn.open && players[myId].hp > 0) {
+                myHostConn.send({ type: 'client_sync', px: players[myId].x, py: players[myId].y, facing: players[myId].facing, yfacing: players[myId].yfacing, hp: players[myId].hp, hunger: players[myId].hunger, thirst: players[myId].thirst, infected: players[myId].infected, weapon: players[myId].weapon });
+            }
+        }
 
-        function attemptAttack() {
-            if (myPlayer.attackCooldown || myPlayer.hp <= 0) return;
-            
-            myPlayer.isAttacking = true;
-            myPlayer.attackCooldown = true;
+        function handleData(sender, data) {
+            if (data.type === 'sync' && !isHost) {
+                for (let i=1; i<=2; i++) {
+                    if (i !== myId) {
+                        Object.assign(players[i], data.players[i]);
+                    } else {
+                        players[i].infected = data.players[i].infected; // Host dictates infection
+                    }
+                }
+                npcs = data.npcs; items = data.items;
+            }
+            if (data.type === 'client_sync' && isHost) {
+                let p = players[sender];
+                p.x = data.px; p.y = data.py; p.facing = data.facing; p.yfacing = data.yfacing; p.hp = data.hp; p.hunger = data.hunger; p.thirst = data.thirst; p.infected = data.infected; p.weapon = data.weapon;
+            }
+            if (data.type === 'shoot') bullets.push(data.bullet);
+            if (data.type === 'hit' && isHost) {
+                let npc = npcs.find(n=>n.id===data.targetId);
+                if (npc) { npc.hp -= data.dmg; spawnText(`-${data.dmg}`, npc.x, npc.y, "#fff"); }
+            }
+            if (data.type === 'pickup' && isHost) items = items.filter(i=>i.id!==data.itemId);
+            if (data.type === 'respawn') resetPlayer(isHost ? sender : myId);
+        }
 
-            // Hitbox logic
-            const hitboxWidth = 80;
-            const hitboxHeight = 40;
-            const hitX = myPlayer.facingRight ? myPlayer.x + myPlayer.width : myPlayer.x - hitboxWidth;
-            const hitY = myPlayer.y + 40; // Attack height
+        // ==========================================
+        // 4. HOST AI & SPAWNING
+        // ==========================================
+        function hostSpawnLogic() {
+            if (!isHost) return;
+            
+            // Drones
+            if (npcs.filter(n=>!n.isBoss).length < 15) {
+                let infected = Math.random() < 0.15; // 15% chance of virus drone
+                npcs.push({ id: Math.random(), x: Math.random()*MAP_SIZE, y: Math.random()*MAP_SIZE, hp: 50, speed: 3.5, infected: infected, isBoss: false });
+            }
 
-            // Check collision with enemy
-            if (
-                hitX < enemy.x + enemy.width &&
-                hitX + hitboxWidth > enemy.x &&
-                hitY < enemy.y + enemy.height &&
-                hitY + hitboxHeight > enemy.y
-            ) {
-                // We hit them!
-                enemy.hp -= 10;
-                updateHealthUI();
-                conn.send({ type: 'damage', amount: 10 });
-                if (enemy.hp <= 0) endGame("YOU WIN!");
-            }
+            // Boss Spawning (10% chance if score > 100)
+            if (players[1].score + players[2].score > 100 && npcs.filter(n=>n.isBoss).length === 0 && Math.random() < 0.1) {
+                npcs.push({ id: Math.random(), x: MAP_SIZE/2, y: MAP_SIZE/2, hp: 600, speed: 2, infected: false, isBoss: true });
+                spawnText("BOSS SPAWNED!", MAP_SIZE/2, MAP_SIZE/2, "#aa00ff");
+            }
+            
+            // Random map items
+            if (items.length < 15 && Math.random() < 0.5) {
+                const types = ['food', 'water', 'rifle', 'medkit'];
+                items.push({ id: Math.random(), x: Math.random()*MAP_SIZE, y: Math.random()*MAP_SIZE, type: types[Math.floor(Math.random()*types.length)] });
+            }
+        }
 
-            // End attack animation quickly
-            setTimeout(() => { myPlayer.isAttacking = false; }, 200);
-            // Cooldown before next attack
-            setTimeout(() => { myPlayer.attackCooldown = false; }, 500);
-        }
+        function updateHostAI() {
+            npcs.forEach(npc => {
+                let target = null, minDist = Infinity;
+                for (let i=1; i<=2; i++) {
+                    let p = players[i];
+                    if (p.active && p.hp>0) {
+                        let d = Math.hypot(p.x-npc.x, p.y-npc.y);
+                        if(d<minDist){ minDist = d; target = p; }
+                    }
+                }
 
-        function updateHealthUI() {
-            document.getElementById('my-health').style.width = Math.max(0, myPlayer.hp) + '%';
-            document.getElementById('enemy-health').style.width = Math.max(0, enemy.hp) + '%';
-        }
+                if (target && minDist < 1000) {
+                    npc.x += ((target.x-npc.x)/minDist)*npc.speed;
+                    npc.y += ((target.y-npc.y)/minDist)*npc.speed;
+                    
+                    if (npc.isBoss && Math.random() < 0.02) {
+                        // Boss shoots
+                        let b = { id: Math.random(), owner: 99, x: npc.x, y: npc.y, vx: ((target.x-npc.x)/minDist)*8, vy: ((target.y-npc.y)/minDist)*8, life: 100 };
+                        bullets.push(b);
+                        clients.forEach(c => { if(c.connection.open) c.connection.send({type: 'shoot', bullet: b}); });
+                    }
 
-        function endGame(message) {
-            const go = document.getElementById('game-over');
-            go.style.display = 'block';
-            go.innerText = message;
-            go.style.color = message.includes("WIN") ? "#00ff00" : "#ff3333";
-        }
+                    if (minDist < (npc.isBoss ? 60 : 30) && Math.random() < 0.1) {
+                        target.hp -= npc.isBoss ? 15 : 5;
+                        if(npc.infected) target.infected = true;
+                        spawnText("HIT!", target.x, target.y-30, "#f00");
+                    }
+                }
+            });
 
-        // --- 3. RENDER LOOP ---
-        function gameLoop() {
-            if (myPlayer.hp > 0 && enemy.hp > 0) {
-                // Input handling
-                if (keys['a']) { myPlayer.x -= myPlayer.speed; myPlayer.facingRight = false; }
-                if (keys['d']) { myPlayer.x += myPlayer.speed; myPlayer.facingRight = true; }
-                if (keys['w'] && myPlayer.y >= GROUND_Y - myPlayer.height) { myPlayer.vy = -16; } // Jump
-                if (keys[' ']) attemptAttack(); // Spacebar
-            }
+            npcs = npcs.filter(n => {
+                if (n.hp <= 0) {
+                    if (n.isBoss) {
+                        for(let i=0; i<5; i++) items.push({id:Math.random(), x:n.x+(Math.random()*40-20), y:n.y+(Math.random()*40-20), type:'scrap'});
+                        items.push({id:Math.random(), x:n.x, y:n.y, type:'medkit'});
+                    } else {
+                        items.push({ id: Math.random(), x: n.x, y: n.y, type: Math.random()>0.5 ? 'scrap' : 'food' });
+                    }
+                    return false;
+                }
+                return true;
+            });
+        }
 
-            // Physics
-            myPlayer.vy += GRAVITY;
-            myPlayer.y += myPlayer.vy;
+        // ==========================================
+        // 5. PLAYER LOGIC (Shooting & Inventory)
+        // ==========================================
+        let attackCooldown = 0;
+        
+        function attemptShoot() {
+            if (attackCooldown > 0 || players[myId].hp <= 0) return;
+            let p = players[myId];
+            
+            let bullet = { id: Math.random(), owner: myId, x: p.x+(p.facing*20), y: p.y, vx: p.facing*(p.weapon==='rifle'?25:15), vy: p.yfacing*15, life: 50 };
+            bullets.push(bullet);
+            
+            let packet = { type: 'shoot', bullet: bullet };
+            if (isHost) clients.forEach(c => { if(c.connection.open) c.connection.send(packet); });
+            else myHostConn.send(packet);
 
-            // Floor collision
-            if (myPlayer.y > GROUND_Y - myPlayer.height) {
-                myPlayer.y = GROUND_Y - myPlayer.height;
-                myPlayer.vy = 0;
-            }
+            attackCooldown = p.weapon === 'rifle' ? 8 : 20; // Rifle shoots much faster
+        }
 
-            // Screen bounds
-            myPlayer.x = Math.max(0, Math.min(canvas.width - myPlayer.width, myPlayer.x));
+        function useItem(slotIndex) {
+            let p = players[myId];
+            let item = p.inventory[slotIndex];
+            if (!item) return;
+            
+            if (item === 'food') { p.hunger = Math.min(100, p.hunger + 40); spawnText("+40 FOOD", p.x, p.y-30, "#ff8800"); }
+            if (item === 'water') { p.thirst = Math.min(100, p.thirst + 40); spawnText("+40 WATER", p.x, p.y-30, "#0088ff"); }
+            if (item === 'medkit') { p.hp = Math.min(100, p.hp + 50); p.infected = false; spawnText("HEALED", p.x, p.y-30, "#0f0"); }
+            
+            p.inventory[slotIndex] = null;
+            updateInventoryUI();
+        }
 
-            // --- DRAWING ---
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        function updateInventoryUI() {
+            let inv = players[myId].inventory;
+            for(let i=0; i<3; i++) {
+                let imgEl = document.getElementById(`img-slot-${i+1}`);
+                if (inv[i]) {
+                    imgEl.src = assets[inv[i]].src;
+                    imgEl.style.display = 'block';
+                } else {
+                    imgEl.style.display = 'none';
+                }
+            }
+        }
 
-            // Draw Ground
-            ctx.fillStyle = '#444';
-            ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+        function resetPlayer(id) {
+            let p = players[id];
+            p.hp = 100; p.hunger = 100; p.thirst = 100; p.score = 0; p.infected = false; p.weapon = 'pistol'; p.inventory = [null,null,null];
+            p.x = MAP_SIZE/2 + (Math.random()*200-100); p.y = MAP_SIZE/2 + (Math.random()*200-100);
+            if (id === myId) { document.getElementById('game-over').style.display='none'; document.getElementById('ui').style.display='block'; updateInventoryUI(); }
+        }
+        function requestRespawn() { if (isHost) resetPlayer(myId); else myHostConn.send({ type: 'respawn' }); }
 
-            // Draw Enemy
-            ctx.fillStyle = enemy.color;
-            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
-            if (enemy.isAttacking) drawAttack(enemy);
+        function spawnText(t,x,y,c) { effects.push({ text: t, x: x, y: y, color: c, life: 30, maxLife: 30 }); }
 
-            // Draw Player
-            ctx.fillStyle = myPlayer.color;
-            ctx.fillRect(myPlayer.x, myPlayer.y, myPlayer.width, myPlayer.height);
-            if (myPlayer.isAttacking) drawAttack(myPlayer);
+        // ==========================================
+        // 6. MAIN LOOP
+        // ==========================================
+        function gameLoop() {
+            if (!gameActive) return;
+            const me = players[myId];
+            if (attackCooldown > 0) attackCooldown--;
 
-            requestAnimationFrame(gameLoop);
-        }
+            if (me.hp > 0) {
+                if (keys['w'] && me.y>20) {me.y -= me.speed; me.yfacing = -1;}
+                if (keys['s'] && me.y<MAP_SIZE-20) {me.y += me.speed; me.yfacing = 1;}
+                if (keys['a'] && me.x>20) { me.x -= me.speed; me.facing = -1; }
+                if (keys['d'] && me.x<MAP_SIZE-20) { me.x += me.speed; me.facing = 1; }
+                if (keys[' ']) {attemptShoot(); me.yfacing = 0; me.facing = 1;}
 
-        function drawAttack(fighter) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-            const hW = 80;
-            const hH = 40;
-            const hX = fighter.facingRight ? fighter.x + fighter.width : fighter.x - hW;
-            const hY = fighter.y + 40;
-            ctx.fillRect(hX, hY, hW, hH);
-        }
-    </script>
+                // Survival Drains
+                me.hunger -= 0.02; me.thirst -= 0.03;
+                if (me.hunger <= 0 || me.thirst <= 0) me.hp -= 0.05; // Starving damage
+            } else if (document.getElementById('game-over').style.display !== 'flex') {
+                document.getElementById('ui').style.display = 'none';
+                document.getElementById('game-over').style.display = 'flex';
+                document.getElementById('death-score').innerText = me.score;
+            }
+
+            // Bullets
+            bullets.forEach(b => {
+                b.x += b.vx; b.y += b.vy; b.life--;
+                if (b.owner === myId && b.life > 0) {
+                    npcs.forEach(npc => {
+                        if (Math.hypot(npc.x-b.x, npc.y-b.y) < (npc.isBoss?40:20)) {
+                            b.life = 0; let dmg = me.weapon === 'rifle' ? 15 : 25;
+                            if (isHost) { npc.hp -= dmg; spawnText(`-${dmg}`, npc.x, npc.y, "#fff"); }
+                            else { myHostConn.send({type:'hit', targetId:npc.id, dmg:dmg}); spawnText(`-${dmg}`, npc.x, npc.y, "#fff"); }
+                        }
+                    });
+                } else if (b.owner === 99 && b.life > 0) { // Boss bullet
+                    if (Math.hypot(me.x-b.x, me.y-b.y) < 20) { b.life = 0; me.hp -= 20; spawnText("-20", me.x, me.y, "#f00"); }
+                }
+            });
+            bullets = bullets.filter(b=>b.life>0);
+
+            // Item Pickup
+            if (me.hp > 0) {
+                items.forEach(item => {
+                    if (!item.pickedUp && Math.hypot(item.x-me.x, item.y-me.y) < 30) {
+                        item.pickedUp = true;
+                        if(isHost) items = items.filter(i=>i.id!==item.id);
+                        else myHostConn.send({type:'pickup', itemId:item.id});
+                        
+                        if (item.type === 'scrap') { me.score += 10; spawnText("+10 SCRAP", me.x, me.y-30, "#ffcc00"); }
+                        else if (item.type === 'rifle') { me.weapon = 'rifle'; spawnText("RIFLE ACQUIRED", me.x, me.y-30, "#fff"); }
+                        else {
+                            // Inventory Items (Food, Water, Medkit)
+                            let slot = me.inventory.indexOf(null);
+                            if (slot !== -1) { me.inventory[slot] = item.type; updateInventoryUI(); spawnText(`PICKED UP ${item.type.toUpperCase()}`, me.x, me.y-30, "#fff"); }
+                            else { item.pickedUp = false; /* Inventory full */ }
+                        }
+                    }
+                });
+            }
+            if(isHost) updateHostAI();
+
+            // UI
+            document.getElementById('hp-fill').style.width = Math.max(0, me.hp)+'%';
+            document.getElementById('hunger-fill').style.width = Math.max(0, me.hunger)+'%';
+            document.getElementById('thirst-fill').style.width = Math.max(0, me.thirst)+'%';
+            document.getElementById('score-text').innerText = me.score;
+            document.getElementById('weapon-text').innerText = me.weapon.toUpperCase();
+
+            drawGame();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // ==========================================
+        // 7. RENDER
+        // ==========================================
+        function drawGame() {
+            const me = players[myId];
+            ctx.clearRect(0,0,canvas.width,canvas.height); ctx.save();
+            ctx.translate(canvas.width/2 - me.x, canvas.height/2 - me.y);
+
+            // Map
+            ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0,0,MAP_SIZE,MAP_SIZE);
+            ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+            for(let i=0; i<MAP_SIZE; i+=100) {
+                ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,MAP_SIZE); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(MAP_SIZE,i); ctx.stroke();
+            }
+            ctx.strokeStyle = '#ffcc00'; ctx.strokeRect(0,0,MAP_SIZE,MAP_SIZE);
+
+            // Items, NPCs, Bullets
+            items.filter(i=>!i.pickedUp).forEach(item => ctx.drawImage(assets[item.type], item.x-15, item.y-15, 30, 30));
+            
+            npcs.forEach(npc => {
+                let size = npc.isBoss ? 80 : 40;
+                let offset = size/2;
+                ctx.drawImage(npc.isBoss ? assets.boss : assets.enemy, npc.x-offset, npc.y-offset, size, size);
+                ctx.fillStyle = '#f00'; ctx.fillRect(npc.x-offset, npc.y-(offset+10), size*(npc.hp/(npc.isBoss?600:50)), 5);
+                // Virus Aura
+                if (npc.infected) { ctx.beginPath(); ctx.arc(npc.x, npc.y, size, 0, Math.PI*2); ctx.fillStyle="rgba(0,255,0,0.2)"; ctx.fill(); }
+            });
+
+            bullets.forEach(b => {
+                ctx.fillStyle = b.owner === 99 ? '#aa00ff' : '#0ff';
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.owner===99?8:5, 0, Math.PI*2); ctx.fill();
+            });
+
+            // Players
+            for (let id=1; id<=2; id++) {
+                let p = players[id];
+                if (!p.active || p.hp<=0) continue;
+                
+                // Virus Aura
+                if (p.infected) {
+                    ctx.beginPath(); ctx.arc(p.x, p.y, 60, 0, Math.PI*2);
+                    ctx.fillStyle = "rgba(0, 255, 0, 0.3)"; ctx.fill();
+                    ctx.strokeStyle = "#0f0"; ctx.lineWidth = 2; ctx.stroke();
+                }
+
+                ctx.save(); ctx.translate(p.x, p.y); ctx.scale(p.facing, 1);
+                ctx.drawImage(assets[id], -20, -20, 40, 40);
+                if (p.weapon === 'rifle') ctx.drawImage(assets.rifle, 0, -5, 40, 20); // Draw equipped gun
+                ctx.restore();
+
+                let label = id == myId ? 'YOU' : `P${id}`;
+                ctx.fillStyle = id == myId ? '#00ff88' : '#fff';
+                ctx.font = '14px monospace'; ctx.textAlign = 'center'; ctx.fillText(label, p.x, p.y-35);
+            }
+
+            effects.forEach((ef, i) => {
+                ctx.fillStyle = ef.color; ctx.globalAlpha = ef.life/ef.maxLife; ctx.font = 'bold 20px monospace';
+                ctx.fillText(ef.text, ef.x, ef.y - (30-ef.life)); ctx.globalAlpha = 1.0;
+                ef.life--; if (ef.life<=0) effects.splice(i,1);
+            });
+
+            ctx.restore();
+        }
+    </script>
 </body>
 </html>
+
