@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Brawler</title>
+    <script src="https://unpkg.com/peerjs@1.5.0/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; color: white; font-family: sans-serif; }
+        #ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; }
+        #setup { pointer-events: auto; background: rgba(0,0,0,0.8); width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; position: absolute; z-index: 10; }
+        .box { background: #333; padding: 20px; border-radius: 8px; text-align: center; border: 2px solid #555; }
+        input, button { padding: 10px; margin: 5px; font-size: 16px; pointer-events: auto; }
+        
+        /* Health Bars */
+        #hud { display: none; justify-content: space-between; padding: 20px; position: absolute; top: 0; width: 100%; box-sizing: border-box; }
+        .health-bar-container { width: 300px; height: 30px; background: #444; border: 3px solid #fff; border-radius: 5px; overflow: hidden; }
+        .health-fill { height: 100%; background: #00ff00; transition: width 0.1s; }
+        #p1-health { transform-origin: left; }
+        #p2-health { background: #ff3333; transform-origin: right; }
+        .player-label { font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
+        
+        #game-over { display: none; position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%); font-size: 48px; text-align: center; text-shadow: 2px 2px 0 #000; }
+    </style>
+</head>
+<body>
+
+    <!-- Setup Menu -->
+    <div id="setup">
+        <div class="box">
+            <h2>P2P Fighting Game</h2>
+            <p>Your ID: <strong id="my-id" style="color: #00ff00;">Loading...</strong></p>
+            <hr style="border-color: #555;">
+            <p>Send your ID to a friend, or connect to theirs:</p>
+            <input type="text" id="friend-id" placeholder="Paste Friend's ID here">
+            <button onclick="connectToFriend()">FIGHT</button>
+        </div>
+    </div>
+
+    <!-- In-Game HUD -->
+    <div id="hud">
+        <div>
+            <div class="player-label" id="my-label">You (P1)</div>
+            <div class="health-bar-container"><div id="my-health" class="health-fill" style="width: 100%;"></div></div>
+        </div>
+        <div style="text-align: right;">
+            <div class="player-label" id="enemy-label">Enemy (P2)</div>
+            <div class="health-bar-container"><div id="enemy-health" class="health-fill" style="width: 100%; float: right;"></div></div>
+        </div>
+    </div>
+    
+    <div id="game-over"></div>
+
+    <!-- Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        // --- 1. NETWORKING SETUP (PeerJS) ---
+        const peer = new Peer();
+        let conn = null;
+        let isHost = false;
+
+        peer.on('open', (id) => {
+            document.getElementById('my-id').innerText = id;
+        });
+
+        // Scenario A: Someone connects to us
+        peer.on('connection', (connection) => {
+            conn = connection;
+            isHost = true; // The person who generated the base ID is Host (starts on left)
+            setupNetworkEvents();
+        });
+
+        // Scenario B: We connect to someone
+        function connectToFriend() {
+            const friendId = document.getElementById('friend-id').value;
+            if (!friendId) return;
+            conn = peer.connect(friendId);
+            isHost = false; // We joined, so we start on the right
+            conn.on('open', setupNetworkEvents);
+        }
+
+        function setupNetworkEvents() {
+            document.getElementById('setup').style.display = 'none';
+            document.getElementById('hud').style.display = 'flex';
+            
+            // Set spawn positions based on who hosted
+            myPlayer.x = isHost ? 150 : 650;
+            myPlayer.color = isHost ? '#00bbff' : '#ff3355';
+            myPlayer.facingRight = isHost;
+
+            enemy.x = isHost ? 650 : 150;
+            enemy.color = isHost ? '#ff3355' : '#00bbff';
+            enemy.facingRight = !isHost;
+
+            // Listen for incoming game state
+            conn.on('data', (data) => {
+                if (data.type === 'sync') {
+                    enemy.x = data.x;
+                    enemy.y = data.y;
+                    enemy.isAttacking = data.isAttacking;
+                    enemy.facingRight = data.facingRight;
+                } else if (data.type === 'damage') {
+                    myPlayer.hp -= data.amount;
+                    updateHealthUI();
+                    if (myPlayer.hp <= 0) endGame("YOU LOSE");
+                }
+            });
+
+            // Start Game Loop
+            requestAnimationFrame(gameLoop);
+            
+            // Sync loop (send data 30 times a second)
+            setInterval(sendSync, 1000 / 30);
+        }
+
+        function sendSync() {
+            if (conn && conn.open) {
+                conn.send({
+                    type: 'sync',
+                    x: myPlayer.x,
+                    y: myPlayer.y,
+                    isAttacking: myPlayer.isAttacking,
+                    facingRight: myPlayer.facingRight
+                });
+            }
+        }
+
+        // --- 2. GAME LOGIC & PHYSICS ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const GROUND_Y = canvas.height - 100;
+        const GRAVITY = 0.8;
+
+        const myPlayer = { x: 0, y: GROUND_Y - 150, width: 60, height: 150, color: 'blue', hp: 100, vy: 0, speed: 7, isAttacking: false, facingRight: true, attackCooldown: false };
+        const enemy = { x: 0, y: GROUND_Y - 150, width: 60, height: 150, color: 'red', hp: 100, isAttacking: false, facingRight: false };
+
+        const keys = {};
+        window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; });
+        window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+        function attemptAttack() {
+            if (myPlayer.attackCooldown || myPlayer.hp <= 0) return;
+            
+            myPlayer.isAttacking = true;
+            myPlayer.attackCooldown = true;
+
+            // Hitbox logic
+            const hitboxWidth = 80;
+            const hitboxHeight = 40;
+            const hitX = myPlayer.facingRight ? myPlayer.x + myPlayer.width : myPlayer.x - hitboxWidth;
+            const hitY = myPlayer.y + 40; // Attack height
+
+            // Check collision with enemy
+            if (
+                hitX < enemy.x + enemy.width &&
+                hitX + hitboxWidth > enemy.x &&
+                hitY < enemy.y + enemy.height &&
+                hitY + hitboxHeight > enemy.y
+            ) {
+                // We hit them!
+                enemy.hp -= 10;
+                updateHealthUI();
+                conn.send({ type: 'damage', amount: 10 });
+                if (enemy.hp <= 0) endGame("YOU WIN!");
+            }
+
+            // End attack animation quickly
+            setTimeout(() => { myPlayer.isAttacking = false; }, 200);
+            // Cooldown before next attack
+            setTimeout(() => { myPlayer.attackCooldown = false; }, 500);
+        }
+
+        function updateHealthUI() {
+            document.getElementById('my-health').style.width = Math.max(0, myPlayer.hp) + '%';
+            document.getElementById('enemy-health').style.width = Math.max(0, enemy.hp) + '%';
+        }
+
+        function endGame(message) {
+            const go = document.getElementById('game-over');
+            go.style.display = 'block';
+            go.innerText = message;
+            go.style.color = message.includes("WIN") ? "#00ff00" : "#ff3333";
+        }
+
+        // --- 3. RENDER LOOP ---
+        function gameLoop() {
+            if (myPlayer.hp > 0 && enemy.hp > 0) {
+                // Input handling
+                if (keys['a']) { myPlayer.x -= myPlayer.speed; myPlayer.facingRight = false; }
+                if (keys['d']) { myPlayer.x += myPlayer.speed; myPlayer.facingRight = true; }
+                if (keys['w'] && myPlayer.y >= GROUND_Y - myPlayer.height) { myPlayer.vy = -16; } // Jump
+                if (keys[' ']) attemptAttack(); // Spacebar
+            }
+
+            // Physics
+            myPlayer.vy += GRAVITY;
+            myPlayer.y += myPlayer.vy;
+
+            // Floor collision
+            if (myPlayer.y > GROUND_Y - myPlayer.height) {
+                myPlayer.y = GROUND_Y - myPlayer.height;
+                myPlayer.vy = 0;
+            }
+
+            // Screen bounds
+            myPlayer.x = Math.max(0, Math.min(canvas.width - myPlayer.width, myPlayer.x));
+
+            // --- DRAWING ---
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw Ground
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, GROUND_Y, canvas.width, canvas.height - GROUND_Y);
+
+            // Draw Enemy
+            ctx.fillStyle = enemy.color;
+            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            if (enemy.isAttacking) drawAttack(enemy);
+
+            // Draw Player
+            ctx.fillStyle = myPlayer.color;
+            ctx.fillRect(myPlayer.x, myPlayer.y, myPlayer.width, myPlayer.height);
+            if (myPlayer.isAttacking) drawAttack(myPlayer);
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        function drawAttack(fighter) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            const hW = 80;
+            const hH = 40;
+            const hX = fighter.facingRight ? fighter.x + fighter.width : fighter.x - hW;
+            const hY = fighter.y + 40;
+            ctx.fillRect(hX, hY, hW, hH);
+        }
+    </script>
+</body>
+</html>
