@@ -119,10 +119,22 @@
         // ==========================================
         // 3. NETWORKING
         // ==========================================
-        const peer = new Peer();
-        let clients = []; let myHostConn = null;
-
-        peer.on('open', id => document.getElementById('my-id').innerText = id);
+        const shortId = Math.random().toString(36).substring(2, 7);
+        
+        const peer = new Peer(shortId); 
+        
+        let clients = []; 
+        let myHostConn = null;
+        
+        peer.on('open', id => {
+          document.getElementById('my-id').innerText = id;
+        });
+        
+        peer.on('error', (err) => {
+          if (err.type === 'unavailable-id') {
+            console.log('ID is taken, trying another...');
+          }
+        });
 
         function startAsHost() {
             isHost = true; myId = 1; startGameUI();
